@@ -10,7 +10,7 @@ interface VersionHistoryProps {
 
 const VersionHistory: React.FC<VersionHistoryProps> = ({ versions, onRevert }) => {
   return (
-    <div className="p-4 flex flex-col h-full space-y-4">
+    <div className="h-full overflow-y-auto custom-scrollbar p-4 flex flex-col space-y-4">
       <div className="bg-amber-50 p-3 rounded-xl border border-amber-100 mb-2">
         <p className="text-[10px] text-amber-700 font-bold leading-tight">系统已为您实时备份，每当章节发生较大变动时会自动记录版本。</p>
       </div>

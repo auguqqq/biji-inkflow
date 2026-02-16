@@ -7,11 +7,12 @@ export enum ViewMode {
   Search = 'search',
   Bookshelf = 'bookshelf',
   History = 'history',
-  Settings = 'settings'
+  Settings = 'settings',
+  Ambience = 'ambience'
 }
 
 export interface AIConfig {
-  provider: 'gemini' | 'deepseek' | 'openai' | 'custom';
+  provider: 'gemini' | 'deepseek' | 'openai' | 'custom' | 'deepseek-trial';
   apiKey: string;
   baseUrl: string;
   model: string;
@@ -25,6 +26,8 @@ export interface AppSettings {
   autoSaveInterval: number; // seconds
   autoFormatOnSave: boolean;
   ai: AIConfig;
+  isPro: boolean; // Membership status
+  proTrialStartedAt?: number; // Timestamp for 15-min trial start
 }
 
 export interface ChapterVersion {
@@ -44,8 +47,22 @@ export interface Chapter {
   versions?: ChapterVersion[];
 }
 
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface SearchState {
+  query: string;
+  resultHTML: string; // Stored as formatted HTML string
+  sources: any[];
+  isSearching: boolean;
+  timestamp: number;
+}
+
 export interface Book {
   id: string;
+  type: 'novel' | 'anthology'; // New field: Novel (Long-form) vs Anthology (Short stories)
   title: string;
   coverColor: string;
   coverImage?: string; // Base64 or URL
@@ -53,15 +70,27 @@ export interface Book {
   currentChapterId: string;
   isFinished?: boolean;
   createdAt: number;
-  totalWritingTime?: number; // In minutes (simulated)
+  totalWritingTime?: number; 
+  
+  // New Persistence Fields
+  aiChatLogs?: ChatMessage[]; // Max 80 items
+  searchState?: SearchState; // Persist search result per book
+  bookSummary?: string; // 100-300 words summary
+  
+  // Persist Deep Analysis
+  analysisReport?: {
+    text: string; // Markdown content
+    data?: any; // JSON data for charts
+    timestamp: number;
+  };
 }
 
 export interface WritingStats {
   dailyCount: number;
-  weeklyCount: number[]; // Deprecated in favor of writingHistory for new implementation
-  speed: number; // chars per minute
+  weeklyCount: number[]; 
+  speed: number; 
   startTime: number;
-  writingHistory: Record<string, number>; // Date string (YYYY-MM-DD) -> count
+  writingHistory: Record<string, number>; 
 }
 
 export interface Inspiration {
@@ -74,7 +103,7 @@ export interface BlackHouseConfig {
   active: boolean;
   type: 'word' | 'time';
   target: number;
-  currentProgress: number; // 累计新增字数 (只加不减)
-  lastTotalCount: number; // 上一次统计时的文档总字数
+  currentProgress: number; 
+  lastTotalCount: number; 
   startTime?: number;
 }
