@@ -737,8 +737,52 @@ const Editor: React.FC<EditorProps> = ({
           const userPrompt = `请对以下章节进行深度批注：\n\n${chapter.content.slice(0, 10000)}`;
           const aiText = await generateResponse(userPrompt, systemPrompt);
           let parsed: DeepCritiqueItem[] = [];
-          try { const jsonMatch = aiText.match(/\[\s*\{.*\}\s*\]/s); if (jsonMatch) { parsed = JSON.parse(jsonMatch[0]); } } catch (e) { console.warn("JSON Parse Error", e); }
-          const resultsWithIds = parsed.map((item, i) => ({ ...item, id: `crit-${Date.now()}-${i}` }));
+          
+          try {
+              // 1. Try to find JSON array directly
+              const jsonMatch = aiText.match(/\[\s*\{.*\}\s*\]/s);
+              if (jsonMatch) {
+                  parsed = JSON.parse(jsonMatch[0]);
+              } else {
+                  // 2. Try to strip markdown code blocks if present
+                  const cleanText = aiText.replace(/```json/g, '').replace(/```/g, '').trim();
+                  // 3. Try to find array start/end
+                  const start = cleanText.indexOf('[');
+                  const end = cleanText.lastIndexOf(']');
+                  if (start !== -1 && end !== -1) {
+                      parsed = JSON.parse(cleanText.substring(start, end + 1));
+                  }
+              }
+          } catch (e) {
+              console.warn("JSON Parse Error", e);
+          }
+          
+          // Fallback: If parsing failed or result is empty, but we have AI text, wrap it
+          if (!Array.isArray(parsed) || parsed.length === 0) {
+              if (aiText && aiText.trim().length > 0) {
+                  console.log("Using fallback for non-JSON response");
+                  parsed = [{
+                      id: `crit-fallback-${Date.now()}`,
+                      tag: '深度分析',
+                      quote: '（AI 未返回结构化数据，显示原始分析）',
+                      advice: aiText,
+                      suggestion: aiText // Compatible with different interfaces
+                  } as any];
+              } else {
+                  parsed = [];
+              }
+          }
+          
+          // Normalize the parsed items to ensure consistent keys
+          parsed = parsed.map((item: any) => ({
+              id: item.id || `crit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              tag: item.tag || item.批注位置 || item.标签 || '深度批注',
+              quote: item.quote || item.批注内容 || item.原文引用 || '',
+              advice: item.advice || item.修改建议 || item.批注建议 || item.suggestion || item.content || '',
+              suggestion: item.suggestion || item.修改建议 || ''
+          }));
+
+          const resultsWithIds = parsed.map((item, i) => ({ ...item, id: item.id || `crit-${Date.now()}-${i}` }));
           setCritiqueResults(resultsWithIds); onUpdateChapter(chapter.id, { critiqueData: resultsWithIds });
       } catch (e: any) { alert(`分析失败: ${getFriendlyErrorMessage(e)}`); setShowCritiquePanel(false); } finally { setCritiqueLoading(false); }
   };

@@ -329,7 +329,10 @@ const App: React.FC = () => {
     if (isPro || isTrialActive) {
         callback();
     } else {
-        setTrialStatus('expired');
+        // Only set to expired if they actually started it and it ran out
+        if (appSettings.proTrialStartedAt) {
+             setTrialStatus('expired');
+        }
         setShowPaymentModal(true);
     }
   };

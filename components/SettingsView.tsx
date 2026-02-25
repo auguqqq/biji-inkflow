@@ -192,6 +192,14 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, setSettings, onPr
                                 试用 15 分钟
                             </button>
                         )}
+                        {trialStatus === 'expired' && (
+                             <button 
+                                disabled
+                                className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-gray-100 border border-gray-200 text-gray-400 cursor-not-allowed"
+                            >
+                                试用已结束
+                            </button>
+                        )}
                         <button 
                         onClick={onProAction}
                         className="px-4 py-1.5 rounded-lg text-xs font-black transition-all bg-amber-600 text-white hover:bg-amber-700 shadow-lg shadow-amber-600/30"

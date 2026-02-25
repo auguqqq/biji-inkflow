@@ -79,7 +79,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, onSuccess,
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
       <div className="bg-white w-full max-w-sm md:max-w-md rounded-[2rem] shadow-2xl overflow-hidden relative border border-white/20">
         <button 
             onClick={onClose} 
@@ -118,6 +118,18 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, onSuccess,
                         <Sparkles size={12} className="mr-1.5" />
                         试用进行中，喜欢请考虑赞助
                     </p>
+                </div>
+            )}
+
+            {trialStatus === 'expired' && (
+                <div className="mb-6 p-1 bg-gray-50 rounded-2xl border border-gray-100 opacity-60">
+                    <button 
+                        disabled
+                        className="w-full py-3 bg-gray-100 rounded-xl shadow-none text-gray-400 font-bold text-sm flex items-center justify-center space-x-2 border border-gray-200 cursor-not-allowed"
+                    >
+                        <Clock size={16} />
+                        <span>试用已结束</span>
+                    </button>
                 </div>
             )}
 

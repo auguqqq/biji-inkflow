@@ -61,6 +61,21 @@ export const getDeepCritiqueSystemPrompt = (subGenre: string, ignoredTags: strin
   }
 
   prompt += d(PROMPTS.DEEP_CRITIQUE_OUTPUT);
+  
+  // Force JSON format with specific schema
+  prompt += `\n\nIMPORTANT: You MUST return the result as a valid JSON Array. Do not wrap it in markdown code blocks. Just the raw JSON array.
+  
+  The JSON object MUST follow this schema:
+  [
+    {
+      "tag": "Short tag (e.g., 节奏, 人设, 剧情, 逻辑)",
+      "quote": "The exact original text segment you are critiquing (must be found in the input)",
+      "advice": "Your detailed critique and specific suggestion for improvement"
+    },
+    ...
+  ]
+  `;
+  
   return prompt;
 };
 
