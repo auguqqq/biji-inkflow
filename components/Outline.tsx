@@ -1,5 +1,5 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, GripVertical, Trash2, Download, FileText, Sparkles, Loader2, Info } from 'lucide-react';
 import { Chapter, Book, AppSettings, AIConfig } from '../types';
@@ -17,27 +17,25 @@ interface OutlineProps {
   isAnthology?: boolean;
 }
 
-const TRIAL_LIMIT_REQUESTS = 50;
-const EMBEDDED_DEEPSEEK_KEY = "sk-REPLACE_WITH_YOUR_DEEPSEEK_KEY"; // REPLACE THIS!
+// Retry Helper
+async function withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 2000): Promise<T> {
+  try {
+    return await fn();
+  } catch (error: any) {
+    const isRateLimit = 
+        error.status === 429 || 
+        error.code === 429 || 
+        (error.message && (error.message.includes('429') || error.message.includes('quota') || error.message.includes('RESOURCE_EXHAUSTED')));
+    
+    if (retries > 0 && isRateLimit) {
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return withRetry(fn, retries - 1, delay * 2);
+    }
+    throw error;
+  }
+}
 
-// Copy helper function to ensure Outline works with generic providers
 const fetchOpenAICompatible = async (config: AIConfig, messages: any[]) => {
-  // --- TRIAL MODE LOGIC ---
-  if (config.provider === 'deepseek-trial') {
-      const usage = parseInt(localStorage.getItem('inkflow_trial_usage') || '0');
-      if (usage >= TRIAL_LIMIT_REQUESTS) {
-          throw new Error(`今日免费额度已领完，请填入自己的 Key 或明天再来。`);
-      }
-      config.apiKey = EMBEDDED_DEEPSEEK_KEY;
-      config.baseUrl = "https://api.deepseek.com";
-      config.model = "deepseek-chat"; 
-  }
-  // ------------------------
-
-  if (!config.apiKey || config.apiKey.includes('REPLACE')) {
-     throw new Error("API Key 未配置或试用额度已耗尽");
-  }
-
   let baseUrl = config.baseUrl.trim().replace(/\/+$/, '');
   if (baseUrl.endsWith('/chat/completions')) {
     baseUrl = baseUrl.substring(0, baseUrl.length - '/chat/completions'.length);
@@ -58,26 +56,10 @@ const fetchOpenAICompatible = async (config: AIConfig, messages: any[]) => {
   });
 
   if (!response.ok) {
-      const errorText = await response.text();
-      // DeepSeek Trial Logic: Catch 402/Balance errors
-      if (config.provider === 'deepseek-trial') {
-          if (response.status === 402 || errorText.includes('Insufficient Balance') || errorText.includes('Balance')) {
-              // Lock local usage to prevent spamming
-              localStorage.setItem('inkflow_trial_usage', '9999');
-              throw new Error("今日免费额度已领完，请填入自己的 Key 或明天再来。");
-          }
-      }
-      throw new Error(errorText || `请求失败 (${response.status})`);
+      if (response.status === 429) throw { status: 429 };
+      throw new Error(`请求失败 (${response.status})`);
   }
-
   const data = await response.json();
-  
-  // --- SUCCESS: INCREMENT TRIAL USAGE ---
-  if (config.provider === 'deepseek-trial') {
-      const current = parseInt(localStorage.getItem('inkflow_trial_usage') || '0');
-      localStorage.setItem('inkflow_trial_usage', (current + 1).toString());
-  }
-  
   return data.choices[0]?.message?.content || "";
 };
 
@@ -87,6 +69,21 @@ const Outline: React.FC<OutlineProps> = ({ chapters, currentChapterId, onSelectC
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
   
+  // Theme Detection
+  const [isSystemDark, setIsSystemDark] = useState(false);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+        setIsSystemDark(window.matchMedia('(prefers-color-scheme: dark)').matches);
+        const mq = window.matchMedia('(prefers-color-scheme: dark)');
+        const handler = (e: MediaQueryListEvent) => setIsSystemDark(e.matches);
+        mq.addEventListener('change', handler);
+        return () => mq.removeEventListener('change', handler);
+    }
+  }, []);
+
+  const isDark = settings.theme === 'dark' || (settings.theme === 'system' && isSystemDark);
+  const isGreen = settings.theme === 'green';
+
   // Hover Tooltip State
   const [hoveredSynopsis, setHoveredSynopsis] = useState<{ id: string, text: string, top: number, left: number } | null>(null);
   const synopsisRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -151,13 +148,12 @@ const Outline: React.FC<OutlineProps> = ({ chapters, currentChapterId, onSelectC
   };
 
   const handleGenerateSummary = async () => {
-      if (!settings.ai.apiKey && settings.ai.provider !== 'deepseek-trial') return alert("请先在设置中配置 API Key");
+      if (!settings.ai.apiKey) return alert("请先在设置中配置 API Key");
       
       setIsGeneratingSummary(true);
       setGenerationError(null);
       
       try {
-          // Limit context to save budget
           const sample = chapters.map(c => c.content).join('\n').slice(0, 15000);
           const prompt = isAnthology 
             ? `请阅读以下短篇小说集的内容片段，生成一段 100-300 字的精炼简介，概括这些故事的整体风格、主题共性或精彩之处。文本：${sample}`
@@ -167,15 +163,18 @@ const Outline: React.FC<OutlineProps> = ({ chapters, currentChapterId, onSelectC
 
           if (settings.ai.provider === 'gemini') {
               const ai = new GoogleGenAI({ apiKey: settings.ai.apiKey });
-              const response = await ai.models.generateContent({
-                  model: settings.ai.model || 'gemini-3-flash-preview',
-                  contents: prompt,
-                  config: { maxOutputTokens: 500 }
+              // Apply retry wrapper
+              const response = await withRetry(async () => {
+                  return await ai.models.generateContent({
+                    model: settings.ai.model || 'gemini-3-flash-preview',
+                    contents: prompt,
+                    config: { maxOutputTokens: 500 }
+                  });
               });
               result = response.text || "";
           } else {
-              // Use generic provider (or trial)
-              result = await fetchOpenAICompatible(settings.ai, [{ role: 'user', content: prompt }]);
+              // Apply retry wrapper
+              result = await withRetry(() => fetchOpenAICompatible(settings.ai, [{ role: 'user', content: prompt }]));
           }
 
           if (result) {
@@ -189,24 +188,20 @@ const Outline: React.FC<OutlineProps> = ({ chapters, currentChapterId, onSelectC
           const rawMsg = e.message || "";
           
           if (rawMsg.includes('429') || rawMsg.includes('quota') || rawMsg.includes('RESOURCE_EXHAUSTED')) {
-              msg = "API 配额不足 (429)";
+              msg = "API 配额不足，请稍后再试";
           } else if (rawMsg.includes('404')) {
               msg = "模型未找到";
           } else if (rawMsg.includes('403')) {
               msg = "鉴权失败";
-          } else if (rawMsg.includes('试用') || rawMsg.includes('今日免费额度')) {
-              msg = rawMsg; 
           }
           
           setGenerationError(msg);
-          // Clear error after 4s
           setTimeout(() => setGenerationError(null), 4000);
       } finally {
           setIsGeneratingSummary(false);
       }
   };
 
-  // Drag handlers...
   const handleDragStart = (e: React.DragEvent, index: number) => {
     setDraggedIndex(index);
     e.dataTransfer.effectAllowed = 'move';
@@ -245,68 +240,86 @@ const Outline: React.FC<OutlineProps> = ({ chapters, currentChapterId, onSelectC
   };
 
   const handleSynopsisMouseEnter = (id: string, text: string) => {
-      // Don't show tooltip if text is empty
       if (!text || text.length < 1) return; 
       
       const el = synopsisRefs.current[id];
-      // Don't show tooltip if the input is currently focused (user is editing)
       if (document.activeElement === el) return;
 
       if (el) {
-          // Check if text is truncated or long enough
-          // scrollWidth > clientWidth means text is overflowing
           const isOverflowing = el.scrollWidth > el.clientWidth;
-          
-          // Show if strictly overflowing OR length is long enough (UX safety net)
           if (isOverflowing || text.length > 8) {
              const rect = el.getBoundingClientRect();
-             // Adjust position to avoid being covered by mouse
              setHoveredSynopsis({ id, text, top: rect.bottom + 8, left: rect.left });
           }
       }
   };
 
+  const containerClass = isGreen ? 'bg-[#e8f5e9]' : (isDark ? 'bg-[#111]' : 'bg-gray-50/50');
+  const headerClass = isGreen ? 'bg-[#e8f5e9] border-green-100' : (isDark ? 'bg-[#1c1c1e] border-white/5' : 'border-gray-100 bg-white');
+  const textClass = isGreen ? 'text-emerald-900' : (isDark ? 'text-gray-200' : 'text-gray-700');
+  const mutedTextClass = isGreen ? 'text-emerald-700/60' : (isDark ? 'text-gray-500' : 'text-gray-400');
+
   return (
-    <div className="h-full flex flex-col bg-gray-50/50 relative">
-      {/* Header Actions */}
-      <div className="flex flex-col p-4 pb-2 border-b border-gray-100 bg-white shrink-0">
+    <div className={`h-full flex flex-col relative transition-colors duration-300 ${containerClass}`}>
+      <div className={`flex flex-col p-4 pb-2 border-b shrink-0 ${headerClass}`}>
         <div className="flex justify-between items-center mb-3">
-            <span className="text-xs font-black text-gray-400 uppercase tracking-widest flex items-center">
+            <span className={`text-xs font-black uppercase tracking-widest flex items-center ${mutedTextClass}`}>
                 <FileText size={12} className="mr-1.5" /> {isAnthology ? '篇目列表' : '故事脉络'}
             </span>
             <button 
                 onClick={addChapter}
-                className="flex items-center space-x-1 px-3 py-1.5 bg-gray-900 text-white rounded-lg text-xs font-bold hover:bg-black transition-all shadow-lg shadow-gray-200 active:scale-95"
+                className={`flex items-center space-x-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-lg active:scale-95 ${
+                    isGreen 
+                    ? 'bg-[#66bb6a] text-white hover:bg-[#43a047] shadow-[#a5d6a7]'
+                    : (isDark ? 'bg-white text-black hover:bg-gray-200 shadow-white/5' : 'bg-gray-900 text-white hover:bg-black shadow-gray-200')
+                }`}
             >
                 <Plus size={14} />
                 <span>{isAnthology ? '新篇' : '新章'}</span>
             </button>
         </div>
         
-        {/* Book Summary Card - HIDE IF ANTHOLOGY */}
         {!isAnthology && (
-            <div className={`bg-amber-50 rounded-xl p-3 border text-xs transition-colors ${generationError ? 'border-red-200 bg-red-50' : 'border-amber-100'}`}>
+            <div className={`rounded-xl p-3 border text-xs transition-colors ${
+                isGreen
+                ? 'bg-[#a5d6a7]/30 border-[#a5d6a7]/50 text-[#1b5e20]'
+                : (isDark 
+                    ? (generationError ? 'border-red-900/50 bg-red-900/10' : 'bg-amber-900/10 border-amber-700/20 text-amber-200/80')
+                    : (generationError ? 'border-red-200 bg-red-50' : 'bg-amber-50 border-amber-100 text-amber-900/70')
+                )
+            }`}>
                 <div className="flex justify-between items-start mb-2">
-                    <span className={`font-bold flex items-center ${generationError ? 'text-red-700' : 'text-amber-800'}`}>
+                    <span className={`font-bold flex items-center ${
+                        isGreen ? 'text-[#2e7d32]' : (isDark 
+                        ? (generationError ? 'text-red-400' : 'text-amber-500') 
+                        : (generationError ? 'text-red-700' : 'text-amber-800'))
+                    }`}>
                         <Info size={12} className="mr-1"/> {generationError ? '生成错误' : '全书简介'}
                     </span>
                     <button 
                         onClick={handleGenerateSummary}
                         disabled={isGeneratingSummary}
-                        className="text-[10px] bg-white border border-amber-200 text-amber-600 px-2 py-0.5 rounded-md hover:bg-amber-100 transition-colors flex items-center disabled:opacity-50"
+                        className={`text-[10px] px-2 py-0.5 rounded-md transition-colors flex items-center disabled:opacity-50 ${
+                            isGreen
+                            ? 'bg-white/80 border-[#a5d6a7] text-[#2e7d32] hover:bg-[#c8e6c9]'
+                            : (isDark 
+                                ? 'bg-transparent border border-amber-500/30 text-amber-400 hover:bg-amber-900/30'
+                                : 'bg-white border border-amber-200 text-amber-600 hover:bg-amber-100')
+                        }`}
                     >
                         {isGeneratingSummary ? <Loader2 size={10} className="animate-spin mr-1"/> : <Sparkles size={10} className="mr-1"/>}
                         {bookSummary ? '重新生成' : 'AI生成'}
                     </button>
                 </div>
-                <p className={`leading-relaxed min-h-[40px] ${generationError ? 'text-red-500' : 'text-amber-900/70'}`}>
+                <p className={`leading-relaxed min-h-[40px] ${
+                    isGreen ? 'text-[#2e7d32]/80' : (isDark ? (generationError ? 'text-red-400' : 'text-amber-100/60') : (generationError ? 'text-red-500' : 'text-amber-900/70'))
+                }`}>
                     {generationError || bookSummary || "暂无简介，点击生成按钮让 AI 通读全书并总结..."}
                 </p>
             </div>
         )}
       </div>
       
-      {/* Chapters List */}
       <div className="flex-grow overflow-y-auto custom-scrollbar p-4 space-y-2 relative" onDragLeave={() => setDragOverIndex(null)}>
         {chapters.map((chapter, idx) => (
           <div 
@@ -319,17 +332,35 @@ const Outline: React.FC<OutlineProps> = ({ chapters, currentChapterId, onSelectC
             onClick={() => onSelectChapter(chapter.id)}
             className={`group flex flex-col px-3 py-2.5 rounded-lg transition-all border relative overflow-visible ${
               currentChapterId === chapter.id 
-              ? 'bg-white border-amber-400 ring-1 ring-amber-500/10 shadow-sm z-10' 
-              : 'bg-white border-gray-200 hover:border-amber-300 hover:shadow-sm'
+              ? (isGreen
+                  ? 'bg-[#a5d6a7] border-[#81c784] text-[#1b5e20] shadow-sm z-10' // Soft Sage Green Background, Dark Green Text
+                  : (isDark 
+                      ? 'bg-amber-900/20 border-amber-600/40 ring-1 ring-amber-500/10 shadow-sm z-10' 
+                      : 'bg-white border-amber-400 ring-1 ring-amber-500/10 shadow-sm z-10')
+                )
+              : (isGreen
+                  ? 'bg-transparent border-transparent hover:bg-[#a5d6a7]/30 hover:border-[#a5d6a7]/50' // Muted hover state
+                  : (isDark
+                      ? 'bg-[#1c1c1e] border-white/5 hover:border-amber-700/50 hover:shadow-sm'
+                      : 'bg-white border-gray-200 hover:border-amber-300 hover:shadow-sm')
+                )
             } ${draggedIndex === idx ? 'opacity-40 scale-95 grayscale' : ''} ${
               dragOverIndex === idx ? 'border-blue-400 bg-blue-50/30 -translate-y-2 z-20 shadow-xl' : ''
             }`}
           >
             <div className="flex items-center">
-                <div className={`cursor-grab active:cursor-grabbing text-gray-300 mr-2 transition-colors ${currentChapterId === chapter.id ? 'text-amber-400' : 'group-hover:text-amber-400'}`}>
+                <div className={`cursor-grab active:cursor-grabbing mr-2 transition-colors ${
+                    currentChapterId === chapter.id 
+                    ? (isGreen ? 'text-[#1b5e20]' : 'text-amber-400')
+                    : (isGreen ? 'text-[#388e3c]/40 group-hover:text-[#2e7d32]' : (isDark ? 'text-gray-600 group-hover:text-amber-500' : 'text-gray-300 group-hover:text-amber-400'))
+                }`}>
                     <GripVertical size={14} />
                 </div>
-                <span className={`text-[10px] font-mono font-bold mr-2 w-5 text-right shrink-0 select-none ${currentChapterId === chapter.id ? 'text-amber-500' : 'text-gray-300'}`}>
+                <span className={`text-[10px] font-mono font-bold mr-2 w-5 text-right shrink-0 select-none ${
+                    currentChapterId === chapter.id 
+                    ? (isGreen ? 'text-[#1b5e20]' : 'text-amber-500')
+                    : (isGreen ? 'text-[#388e3c]/50' : (isDark ? 'text-gray-600' : 'text-gray-300'))
+                }`}>
                     {String(idx + 1).padStart(2, '0')}
                 </span>
                 <input 
@@ -337,11 +368,30 @@ const Outline: React.FC<OutlineProps> = ({ chapters, currentChapterId, onSelectC
                     value={chapter.title}
                     onChange={(e) => updateChapterField(chapter.id, 'title', e.target.value)}
                     onClick={(e) => e.stopPropagation()} 
-                    className={`flex-grow bg-transparent text-sm font-bold focus:outline-none focus:bg-amber-50 rounded px-1 transition-colors truncate ${currentChapterId === chapter.id ? 'text-gray-900' : 'text-gray-600'}`}
+                    className={`flex-grow bg-transparent text-sm font-bold focus:outline-none rounded px-1 transition-colors truncate ${
+                        isGreen
+                        ? (currentChapterId === chapter.id ? 'text-[#1b5e20] focus:bg-white/20' : 'text-[#2e7d32] focus:bg-[#a5d6a7]/20')
+                        : (isDark 
+                            ? (currentChapterId === chapter.id ? 'text-gray-100 focus:bg-white/10' : 'text-gray-400 focus:bg-white/10')
+                            : (currentChapterId === chapter.id ? 'text-gray-900 focus:bg-amber-50' : 'text-gray-600 focus:bg-amber-50')
+                        )
+                    }`}
                 />
                 <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0">
-                    <button onClick={(e) => exportChapter(e, chapter)} className="p-1 text-gray-300 hover:text-amber-600 hover:bg-amber-50 rounded transition-all"><Download size={12} /></button>
-                    <button onClick={(e) => removeChapter(e, chapter.id)} className="p-1 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-all"><Trash2 size={12} /></button>
+                    <button onClick={(e) => exportChapter(e, chapter)} className={`p-1 rounded transition-all ${
+                        isGreen
+                        ? 'text-[#2e7d32]/60 hover:text-[#1b5e20] hover:bg-[#c8e6c9]/50'
+                        : (isDark 
+                            ? 'text-gray-500 hover:text-amber-400 hover:bg-amber-900/30' 
+                            : 'text-gray-300 hover:text-amber-600 hover:bg-amber-50')
+                    }`}><Download size={12} /></button>
+                    <button onClick={(e) => removeChapter(e, chapter.id)} className={`p-1 rounded transition-all ${
+                        isGreen
+                        ? 'text-[#2e7d32]/60 hover:text-red-600 hover:bg-red-50'
+                        : (isDark
+                            ? 'text-gray-500 hover:text-red-400 hover:bg-red-900/30'
+                            : 'text-gray-300 hover:text-red-500 hover:bg-red-50')
+                    }`}><Trash2 size={12} /></button>
                 </div>
             </div>
             
@@ -355,31 +405,45 @@ const Outline: React.FC<OutlineProps> = ({ chapters, currentChapterId, onSelectC
                         value={chapter.synopsis || ''}
                         onChange={(e) => updateChapterField(chapter.id, 'synopsis', e.target.value)}
                         onClick={(e) => e.stopPropagation()}
-                        onFocus={() => setHoveredSynopsis(null)} // Hide tooltip immediately on edit
+                        onFocus={() => setHoveredSynopsis(null)} 
                         onMouseEnter={() => handleSynopsisMouseEnter(chapter.id, chapter.synopsis || '')}
                         onMouseLeave={() => setHoveredSynopsis(null)}
-                        placeholder={isAnthology ? "一句话主旨..." : "一句话梗概..."}
-                        className={`w-full bg-transparent border-b border-dashed border-gray-100 text-[10px] focus:outline-none focus:border-amber-300 focus:bg-amber-50/30 transition-all rounded px-1 h-5 truncate placeholder:text-gray-300 placeholder:italic ${currentChapterId === chapter.id ? 'text-gray-500' : 'text-gray-400'}`}
+                        placeholder={isAnthology ? "本篇导语（50-100 字）" : "本章梗概（50 字左右）"}
+                        className={`w-full bg-transparent border-b border-dashed text-[10px] focus:outline-none transition-all rounded px-1 h-5 truncate ${
+                            isGreen
+                            ? 'border-[#a5d6a7] text-[#2e7d32]/70 focus:border-[#43a047] focus:bg-[#c8e6c9]/20 placeholder:text-[#388e3c]/30'
+                            : (isDark 
+                                ? 'border-white/10 text-gray-500 focus:border-amber-500 focus:bg-white/5 placeholder:text-gray-700'
+                                : 'border-gray-100 text-gray-500 focus:border-amber-300 focus:bg-amber-50/30 placeholder:text-gray-300')
+                        } placeholder:italic`}
                         spellCheck={false}
                     />
                 </div>
             </div>
-            {currentChapterId === chapter.id && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-amber-500" />}
+            {/* Removed active sidebar indicator for green mode to keep it soft */}
+            {!isGreen && currentChapterId === chapter.id && <div className={`absolute left-0 top-0 bottom-0 w-0.5 bg-amber-500`} />}
           </div>
         ))}
       </div>
 
-      {/* Render tooltip in Portal to escape sidebar stacking context */}
       {hoveredSynopsis && createPortal(
           <div 
             className="fixed z-[9999] pointer-events-none animate-in fade-in zoom-in-95 duration-200 max-w-[280px]"
             style={{ 
                 top: hoveredSynopsis.top, 
-                left: Math.min(hoveredSynopsis.left, window.innerWidth - 300) // Prevent overflow right
+                left: Math.min(hoveredSynopsis.left, window.innerWidth - 300)
             }}
           >
-              <div className="bg-white/95 backdrop-blur-md text-gray-700 text-xs p-3 rounded-xl shadow-xl border border-amber-100 leading-relaxed break-words relative ring-1 ring-black/5">
-                  <div className="absolute -top-1 left-4 w-2 h-2 bg-white rotate-45 border-l border-t border-amber-100" />
+              <div className={`backdrop-blur-md text-xs p-3 rounded-xl shadow-xl border leading-relaxed break-words relative ${
+                  isGreen
+                  ? 'bg-white/95 text-[#1b5e20] border-[#a5d6a7]'
+                  : (isDark 
+                      ? 'bg-[#1c1c1e]/95 text-gray-200 border-white/10' 
+                      : 'bg-white/95 text-gray-700 border-amber-100 ring-1 ring-black/5')
+              }`}>
+                  <div className={`absolute -top-1 left-4 w-2 h-2 rotate-45 border-l border-t ${
+                      isGreen ? 'bg-white border-[#a5d6a7]' : (isDark ? 'bg-[#1c1c1e] border-white/10' : 'bg-white border-amber-100')
+                  }`} />
                   <p className="font-medium">{hoveredSynopsis.text}</p>
               </div>
           </div>,

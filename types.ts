@@ -12,22 +12,31 @@ export enum ViewMode {
 }
 
 export interface AIConfig {
-  provider: 'gemini' | 'deepseek' | 'openai' | 'custom' | 'deepseek-trial';
+  provider: 'gemini' | 'deepseek' | 'openai' | 'custom';
   apiKey: string;
   baseUrl: string;
   model: string;
+  availableModels?: string[]; // Store fetched models list here
+}
+
+export interface CustomPrompts {
+  critic?: string;
+  partner?: string;
+  polisher?: string;
 }
 
 export interface AppSettings {
   fontSize: number;
   lineHeight: number;
   theme: 'cream' | 'white' | 'dark' | 'green' | 'system';
+  previousTheme?: 'cream' | 'white' | 'green' | 'system'; // Store the last non-dark theme
   fontFamily: 'serif' | 'sans';
   autoSaveInterval: number; // seconds
   autoFormatOnSave: boolean;
   ai: AIConfig;
   isPro: boolean; // Membership status
   proTrialStartedAt?: number; // Timestamp for 15-min trial start
+  customPrompts?: CustomPrompts; // User defined system prompts
 }
 
 export interface ChapterVersion {
@@ -38,6 +47,22 @@ export interface ChapterVersion {
   wordCount: number;
 }
 
+export interface ProofreadItem {
+    id: string;
+    original: string;
+    suggestion: string;
+    reason: string;
+    type: 'typo' | 'grammar' | 'punctuation';
+}
+
+export interface DeepCritiqueItem {
+    id: string;
+    quote: string;
+    tag: string;
+    advice: string;
+    level: 'warning' | 'critical';
+}
+
 export interface Chapter {
   id: string;
   title: string;
@@ -45,6 +70,8 @@ export interface Chapter {
   synopsis?: string; // 章节梗概/大纲
   lastModified: number;
   versions?: ChapterVersion[];
+  proofreadData?: ProofreadItem[]; // Persisted proofreading results
+  critiqueData?: DeepCritiqueItem[]; // Persisted deep critique results
 }
 
 export interface ChatMessage {
@@ -54,15 +81,21 @@ export interface ChatMessage {
 
 export interface SearchState {
   query: string;
-  resultHTML: string; // Stored as formatted HTML string
+  responseText: string; // Changed from resultHTML to store raw markdown
   sources: any[];
   isSearching: boolean;
   timestamp: number;
 }
 
+export interface StyleProfile {
+  ignoreWords: string[]; // Whitelist of words/phrases to ignore in proofreading
+  ignoredCritiqueTags?: string[]; // Tags/types of critique to ignore
+}
+
 export interface Book {
   id: string;
-  type: 'novel' | 'anthology'; // New field: Novel (Long-form) vs Anthology (Short stories)
+  type: 'novel' | 'anthology'; // Novel (Long-form) vs Anthology (Short stories)
+  subGenre?: string; // e.g. 'xuanhuan', 'romance', 'scifi', 'farming'
   title: string;
   coverColor: string;
   coverImage?: string; // Base64 or URL
@@ -75,7 +108,9 @@ export interface Book {
   // New Persistence Fields
   aiChatLogs?: ChatMessage[]; // Max 80 items
   searchState?: SearchState; // Persist search result per book
+  searchHistory?: string[]; // Store recent search queries
   bookSummary?: string; // 100-300 words summary
+  styleProfile?: StyleProfile; // AI "Memory" for proofreading preferences
   
   // Persist Deep Analysis
   analysisReport?: {

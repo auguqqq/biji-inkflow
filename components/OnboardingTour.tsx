@@ -2,92 +2,55 @@
 import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { X, ChevronRight, ChevronLeft, Sparkles } from 'lucide-react';
 
-interface Step {
+export interface TourStep {
   target: string;
   title: string;
   content: string;
   placement?: 'top' | 'bottom' | 'left' | 'right' | 'center';
 }
 
-const TOUR_STEPS: Step[] = [
-  {
-    target: 'center',
-    title: '欢迎来到 笔纪',
-    content: '我们希望这里是您创意的僚机，而非批量生产文章的工厂。AI 将辅助您打磨灵感，但故事的灵魂始终属于您。祝您码字愉快！',
-    placement: 'center'
-  },
-  {
-    target: '#nav-bookshelf',
-    title: '书架管理',
-    content: '在这里管理您的所有作品。系统会自动统计全书字数和章节信息，井井有条。',
-    placement: 'right'
-  },
-  {
-    target: '#editor-area',
-    title: '专注创作区',
-    content: '这是您的主战场。界面极简，支持一键智能排版（段首缩进）。每隔几秒自动保存，请安心创作。',
-    placement: 'center'
-  },
-  {
-    target: '#ai-assistant-toggle',
-    title: 'AI 智能责编',
-    content: '✨ 点击这里展开侧边面板。它可以帮您复盘剧情、润色文笔，甚至在卡文时提供后续情节建议，是您忠实的读者和顾问。',
-    placement: 'left'
-  },
-  {
-    target: '#nav-outline',
-    title: '大纲与工具箱',
-    content: '切换右侧面板，访问章节大纲、创作统计、灵感便签、历史版本回溯等实用工具。',
-    placement: 'right'
-  },
-  {
-    target: '#nav-focus',
-    title: '小黑屋模式',
-    content: '拖延症克星。强制锁定屏幕，设定字数或时间目标，不达标无法退出，助您进入心流状态。',
-    placement: 'right'
-  },
-  {
-    target: '#nav-settings',
-    title: '个性化设置',
-    content: '配置您的 AI API Key，调整字体大小、主题配色和排版偏好。',
-    placement: 'right'
-  }
-];
+interface OnboardingTourProps {
+  steps: TourStep[];
+  storageKey: string;
+  onComplete?: () => void;
+}
 
-const STORAGE_KEY = 'inkflow_tour_completed_v2';
-
-const OnboardingTour: React.FC = () => {
+const OnboardingTour: React.FC<OnboardingTourProps> = ({ steps, storageKey, onComplete }) => {
   const [currentStep, setCurrentStep] = useState(0);
   const [isActive, setIsActive] = useState(false);
   const [rect, setRect] = useState<DOMRect | null>(null);
+  const [isCalculating, setIsCalculating] = useState(true);
 
   useEffect(() => {
-    const hasSeen = localStorage.getItem(STORAGE_KEY);
+    const hasSeen = localStorage.getItem(storageKey);
     if (!hasSeen) {
-      setTimeout(() => setIsActive(true), 1000);
+      // Small delay to ensure DOM is ready
+      const timer = setTimeout(() => setIsActive(true), 800);
+      return () => clearTimeout(timer);
     }
-  }, []);
+  }, [storageKey]);
 
   const handleFinish = () => {
     setIsActive(false);
-    localStorage.setItem(STORAGE_KEY, 'true');
+    localStorage.setItem(storageKey, 'true');
+    if (onComplete) onComplete();
   };
 
-  const handleSkip = () => {
-    if (confirm('确定要跳过新手引导吗？')) {
-      handleFinish();
-    }
+  const handleSkip = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    handleFinish();
   };
 
-  const currentStepData = TOUR_STEPS[currentStep];
+  const currentStepData = steps[currentStep];
 
   useLayoutEffect(() => {
-    if (!isActive) return;
+    if (!isActive || !currentStepData) return;
 
     const updatePosition = () => {
       const targetSelector = currentStepData.target;
       if (targetSelector === 'center') {
         setRect(null);
+        setIsCalculating(false);
         return;
       }
 
@@ -103,7 +66,6 @@ const OnboardingTour: React.FC = () => {
         );
 
         // Only scroll if strictly necessary to avoid layout shifts (white background bleed)
-        // Use 'nearest' to prevent aggressive centering that pulls the page up
         if (!isVisible) {
              el.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'nearest' });
         }
@@ -125,13 +87,14 @@ const OnboardingTour: React.FC = () => {
           toJSON: () => {}
         });
       } else {
-        // Fallback if element not found
+        // Fallback if element not found, just center it
         setRect(null);
       }
+      setIsCalculating(false);
     };
 
     // Delay slightly to ensure layout is stable
-    const timer = setTimeout(updatePosition, 50);
+    const timer = setTimeout(updatePosition, 100);
     window.addEventListener('resize', updatePosition);
     return () => {
         window.removeEventListener('resize', updatePosition);
@@ -142,6 +105,11 @@ const OnboardingTour: React.FC = () => {
   if (!isActive) return null;
 
   const isGlobalCenter = !rect || currentStepData.target === 'center';
+  
+  // Prevent flash of center content while calculating position for non-center targets
+  if (isCalculating && currentStepData.target !== 'center') {
+      return null;
+  }
 
   // --- Safe Positioning Logic ---
   let tooltipStyle: React.CSSProperties = {};
@@ -197,18 +165,17 @@ const OnboardingTour: React.FC = () => {
         if (top < padding) top = padding;
         const projectedBottom = top + estTooltipHeight;
         if (projectedBottom > window.innerHeight - padding) {
-            // If bottom overflows, try to flip to 'top' placement logic relative to rect
-            // But here simply clamping or adjusting top:
             top = Math.max(padding, window.innerHeight - estTooltipHeight - padding);
         }
     }
 
     tooltipStyle = {
-        position: 'absolute',
+        position: 'fixed', // Use fixed to avoid scroll issues
         left: left,
         top: top,
         bottom: bottom,
-        width: tooltipWidth
+        width: tooltipWidth,
+        zIndex: 10000
     };
   }
 
@@ -251,7 +218,7 @@ const OnboardingTour: React.FC = () => {
                 {currentStep === 0 && <Sparkles className="text-amber-500 mr-2" size={20} />}
                 {currentStepData.title}
             </h3>
-            <button onClick={handleSkip} className="text-gray-400 hover:text-gray-600 p-1">
+            <button onClick={handleSkip} className="text-gray-400 hover:text-gray-600 p-1 pointer-events-auto cursor-pointer">
                 <X size={16} />
             </button>
         </div>
@@ -262,7 +229,7 @@ const OnboardingTour: React.FC = () => {
 
         <div className="flex items-center justify-between mt-auto">
             <div className="flex space-x-1">
-                {TOUR_STEPS.map((_, idx) => (
+                {steps.map((_, idx) => (
                     <div 
                         key={idx} 
                         className={`w-1.5 h-1.5 rounded-full transition-colors ${idx === currentStep ? 'bg-amber-500' : 'bg-gray-200'}`}
@@ -273,7 +240,10 @@ const OnboardingTour: React.FC = () => {
             <div className="flex space-x-2">
                 {currentStep > 0 && (
                     <button 
-                        onClick={() => setCurrentStep(prev => prev - 1)}
+                        onClick={() => {
+                            setIsCalculating(true);
+                            setCurrentStep(prev => prev - 1);
+                        }}
                         className="px-3 py-1.5 text-xs font-bold text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
                     >
                         上一步
@@ -281,7 +251,8 @@ const OnboardingTour: React.FC = () => {
                 )}
                 <button 
                     onClick={() => {
-                        if (currentStep < TOUR_STEPS.length - 1) {
+                        if (currentStep < steps.length - 1) {
+                            setIsCalculating(true);
                             setCurrentStep(prev => prev + 1);
                         } else {
                             handleFinish();
@@ -289,8 +260,8 @@ const OnboardingTour: React.FC = () => {
                     }}
                     className="px-4 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition-all shadow-lg flex items-center"
                 >
-                    {currentStep < TOUR_STEPS.length - 1 ? '下一步' : '开始创作'}
-                    {currentStep < TOUR_STEPS.length - 1 && <ChevronRight size={14} className="ml-1" />}
+                    {currentStep < steps.length - 1 ? '下一步' : '开始创作'}
+                    {currentStep < steps.length - 1 && <ChevronRight size={14} className="ml-1" />}
                 </button>
             </div>
         </div>

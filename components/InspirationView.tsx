@@ -1,15 +1,25 @@
 
-import React, { useState } from 'react';
-import { Inspiration } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Inspiration, AppSettings } from '../types';
 import { PlusCircle, Clock, Trash2, Sparkles } from 'lucide-react';
 
 interface InspirationProps {
   items: Inspiration[];
   setItems: React.Dispatch<React.SetStateAction<Inspiration[]>>;
+  settings: AppSettings;
 }
 
-const InspirationView: React.FC<InspirationProps> = ({ items, setItems }) => {
+const InspirationView: React.FC<InspirationProps> = ({ items, setItems, settings }) => {
   const [newText, setNewText] = useState('');
+  
+  // Theme detection
+  const [isSystemDark, setIsSystemDark] = useState(false);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+        setIsSystemDark(window.matchMedia('(prefers-color-scheme: dark)').matches);
+    }
+  }, []);
+  const isDark = settings.theme === 'dark' || (settings.theme === 'system' && isSystemDark);
 
   const addInspiration = () => {
     if (!newText.trim()) return;
@@ -26,6 +36,15 @@ const InspirationView: React.FC<InspirationProps> = ({ items, setItems }) => {
     setItems(items.filter(i => i.id !== id));
   };
 
+  // Styles
+  const textareaClass = isDark 
+    ? 'bg-[#1c1c1e] border-white/10 text-gray-200 placeholder:text-gray-600 focus:border-amber-500/50' 
+    : 'bg-gray-50 border-gray-100 text-gray-700 placeholder:text-gray-400 focus:border-amber-500/50';
+  
+  const cardClass = isDark 
+    ? 'bg-[#1c1c1e] border-white/5 hover:border-white/10 text-gray-300' 
+    : 'bg-white border-gray-100 hover:border-amber-200 text-gray-700';
+
   return (
     <div className="p-6 flex flex-col h-full bg-inherit">
       <div className="mb-8">
@@ -33,7 +52,7 @@ const InspirationView: React.FC<InspirationProps> = ({ items, setItems }) => {
           value={newText}
           onChange={(e) => setNewText(e.target.value)}
           placeholder="在此捕捉一闪而过的灵感火花..."
-          className="w-full p-4 border border-gray-100 rounded-3xl text-sm bg-gray-50 focus:outline-none focus:ring-4 focus:ring-amber-500/10 focus:border-amber-500/50 resize-none h-32 transition-all custom-scrollbar"
+          className={`w-full p-4 border rounded-3xl text-sm focus:outline-none focus:ring-4 focus:ring-amber-500/10 resize-none h-32 transition-all custom-scrollbar ${textareaClass}`}
         />
         <button 
           onClick={addInspiration}
@@ -50,17 +69,17 @@ const InspirationView: React.FC<InspirationProps> = ({ items, setItems }) => {
             <Sparkles size={12} className="mr-2" /> 历史碎片
         </h3>
         {items.map(item => (
-          <div key={item.id} className="group p-4 bg-white border border-gray-100 rounded-2xl hover:border-amber-200 hover:shadow-lg transition-all relative overflow-hidden">
+          <div key={item.id} className={`group p-4 border rounded-2xl hover:shadow-lg transition-all relative overflow-hidden ${cardClass}`}>
             <div className="absolute top-0 left-0 w-1 h-full bg-amber-400" />
-            <p className="text-sm text-gray-700 leading-relaxed mb-3 pr-4">{item.text}</p>
+            <p className="text-sm leading-relaxed mb-3 pr-4">{item.text}</p>
             <div className="flex items-center justify-between">
-                <div className="flex items-center text-[10px] text-gray-300 font-bold space-x-1">
+                <div className={`flex items-center text-[10px] font-bold space-x-1 ${isDark ? 'text-gray-500' : 'text-gray-300'}`}>
                 <Clock size={10} />
                 <span>{new Date(item.timestamp).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                 </div>
                 <button 
                     onClick={() => removeInspiration(item.id)}
-                    className="text-gray-200 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                    className="text-gray-400 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
                 >
                     <Trash2 size={12} />
                 </button>

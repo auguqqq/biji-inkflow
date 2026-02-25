@@ -121,13 +121,13 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, onSuccess,
                 </div>
             )}
 
-            {/* Features List */}
+            {/* Features List - Synced with SettingsView */}
             <div className="space-y-3 mb-8 px-2">
                 {[
-                    '算法生成的无限自然音效 (雨/风/火)',
-                    '支持上传自定义音轨进行混音',
-                    '导出 EPUB / PDF 电子书 (开发中)',
-                    '无限制版本历史回溯'
+                    '沉浸式白噪音 (风声/雨声/机械键盘)',
+                    '高级导出 (EPUB/PDF)',
+                    '多端云同步 (即将上线)',
+                    '无限制版本回溯'
                 ].map((item, i) => (
                     <div key={i} className="flex items-center space-x-3">
                         <CheckCircle2 size={16} className="text-amber-500 shrink-0" />
@@ -183,7 +183,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, onSuccess,
                 </button>
                 
                 <p className="text-center text-[10px] text-gray-400 pt-2">
-                    ¥3.00 / 永久赞助 · 感谢支持独立开发
+                    ¥6.00 / 永久赞助 · 感谢支持独立开发
                 </p>
             </div>
         </div>
