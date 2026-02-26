@@ -422,6 +422,8 @@ const Editor: React.FC<EditorProps> = ({
   const [showCritiquePanel, setShowCritiquePanel] = useState(false);
   const [critiqueLoading, setCritiqueLoading] = useState(false);
   const [critiqueResults, setCritiqueResults] = useState<DeepCritiqueItem[]>([]);
+  const [highlightRange, setHighlightRange] = useState<{start: number, end: number} | null>(null);
+  const [polishBtnPos, setPolishBtnPos] = useState<{x: number, y: number} | null>(null);
 
   // Refs
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
@@ -876,11 +878,37 @@ const Editor: React.FC<EditorProps> = ({
       // Highlight the text
       setHighlightRange({ start: index, end: index + searchText.length });
       
-      scrollToTextPosition(index);
+      // Scroll handled by useEffect on highlightRange change
   };
 
-  const [highlightRange, setHighlightRange] = useState<{start: number, end: number} | null>(null);
-  const [polishBtnPos, setPolishBtnPos] = useState<{x: number, y: number} | null>(null);
+  // Robust scrolling to highlight target
+  useEffect(() => {
+      if (highlightRange && mainScrollRef.current) {
+          // Use requestAnimationFrame to ensure DOM has updated with the highlight span
+          requestAnimationFrame(() => {
+              const target = document.getElementById('highlight-target');
+              if (target && mainScrollRef.current) {
+                  const container = mainScrollRef.current;
+                  const targetRect = target.getBoundingClientRect();
+                  const containerRect = container.getBoundingClientRect();
+                  
+                  // Calculate relative top position in the scrollable container
+                  const relativeTop = targetRect.top - containerRect.top + container.scrollTop;
+                  
+                  // Target to center the element (1/3 down the screen for better visibility)
+                  const targetScrollTop = relativeTop - (container.clientHeight / 3);
+                  
+                  container.scrollTo({ top: Math.max(0, targetScrollTop), behavior: 'auto' });
+                  
+                  // Set cursor to start of highlight
+                  if (textareaRef.current) {
+                      textareaRef.current.focus({ preventScroll: true });
+                      textareaRef.current.setSelectionRange(highlightRange.start, highlightRange.start);
+                  }
+              }
+          });
+      }
+  }, [highlightRange]);
 
   const clearChatHistory = () => {
       if (window.confirm("确定要清空所有对话历史吗？")) {
@@ -955,7 +983,8 @@ const Editor: React.FC<EditorProps> = ({
       const textarea = textareaRef.current;
       const container = mainScrollRef.current;
       
-      textarea.focus(); 
+      // Use preventScroll to avoid browser jump conflict
+      textarea.focus({ preventScroll: true }); 
       textarea.setSelectionRange(index, index);
       
       const coords = getCoordinates(textarea, index);
@@ -963,8 +992,15 @@ const Editor: React.FC<EditorProps> = ({
       const relativeTop = coords.top - containerRect.top + container.scrollTop;
       
       const targetScrollTop = relativeTop - (container.clientHeight / 3);
-      container.scrollTo({ top: Math.max(0, targetScrollTop), behavior: 'smooth' });
+      container.scrollTo({ top: Math.max(0, targetScrollTop), behavior: 'auto' });
   };
+
+  // Focus on mount
+  useEffect(() => {
+      if (textareaRef.current) {
+          textareaRef.current.focus();
+      }
+  }, []);
 
   const handleCriticReview = async () => { 
       if (chapter.content.length < 50) return alert("写多一点再来让主编评估吧！"); if (aiLoading) return;
@@ -1014,6 +1050,18 @@ const Editor: React.FC<EditorProps> = ({
   
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => { 
       const val = e.target.value;
+      
+      // Preserve scroll position if we are about to clear highlight
+      // This prevents the "jump to bottom" bug when the highlight span is removed
+      if (highlightRange && mainScrollRef.current) {
+          const currentScrollTop = mainScrollRef.current.scrollTop;
+          requestAnimationFrame(() => {
+              if (mainScrollRef.current) {
+                  mainScrollRef.current.scrollTop = currentScrollTop;
+              }
+          });
+      }
+
       setLocalContent(val);
       setHighlightRange(null); // Clear highlight on edit
       
@@ -1234,7 +1282,7 @@ const Editor: React.FC<EditorProps> = ({
                 <div aria-hidden="true" style={{ ...commonTextStyle, visibility: 'visible', gridArea: '1 / 1 / 2 / 2', pointerEvents: 'none', color: 'transparent', zIndex: 0 }}>
                     {localContent.substring(0, highlightRange?.start || 0)}
                     {highlightRange && (
-                        <span className="bg-yellow-200/50">
+                        <span id="highlight-target" className="bg-yellow-200/50">
                             {localContent.substring(highlightRange.start, highlightRange.end)}
                         </span>
                     )}
@@ -1252,7 +1300,6 @@ const Editor: React.FC<EditorProps> = ({
                     placeholder="笔耕不辍，字字千金..."
                     style={{ ...commonTextStyle, gridArea: '1 / 1 / 2 / 2', zIndex: 10 }}
                     className={`${textColors[effectiveTheme as keyof typeof textColors]} ${selectionColors[effectiveTheme as keyof typeof textColors]} placeholder:text-gray-200 ${caretClass}`}
-                    autoFocus
                     spellCheck={false}
                 />
             </div>

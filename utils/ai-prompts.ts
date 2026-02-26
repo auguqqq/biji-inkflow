@@ -48,6 +48,12 @@ export const getProofreadSystemPrompt = (ignoreWords: string[] = []) => {
 ${ignoreWords.map(w => `"${w}"`).join(', ')}`;
   }
 
+  prompt += `\n\n【特别注意】：
+1. **标点符号配对**：严格检查成对标点（如「」、“”、【】、（））是否缺失闭合符号。
+2. **逻辑缺字**：检查句子是否因缺字导致逻辑不通或语义断裂。
+3. **句末标点**：检查段落或完整句子末尾是否缺失句号或其他结束符号。
+`;
+
   prompt += d(PROMPTS.PROOFREAD_OUTPUT);
 
   return prompt;
