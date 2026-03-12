@@ -5,7 +5,8 @@ import { AppSettings, BlackHouseConfig, Chapter, Book, AIConfig, ChatMessage, Pr
 import { GoogleGenAI } from "@google/genai";
 import ReactMarkdown from 'react-markdown';
 import JSZip from 'jszip';
-import html2pdf from 'html2pdf.js';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 import { getProofreadSystemPrompt, getEditorSystemPrompt, getDeepCritiqueSystemPrompt } from '../utils/ai-prompts';
 import OnboardingTour, { TourStep } from './OnboardingTour';
 
@@ -1090,24 +1091,45 @@ const Editor: React.FC<EditorProps> = ({
               link.click();
               URL.revokeObjectURL(url);
           } else if (format === 'pdf') {
-              // Real PDF Export using html2pdf.js
+              // Real PDF Export using html2canvas + jsPDF
              const element = document.createElement('div');
+             element.style.position = 'absolute';
+             element.style.left = '-9999px';
+             element.style.top = '0';
+             element.style.width = '210mm'; // A4 width
              element.innerHTML = `
-                <div style="font-family: 'Noto Serif SC', serif; padding: 40px; color: #333;">
+                <div style="font-family: 'Noto Serif SC', serif; padding: 40px; color: #333; background: white;">
                   <h1 style="text-align: center; font-size: 24px; margin-bottom: 40px;">${chapter.title}</h1>
                   ${chapter.content.split('\n').filter(line => line.trim()).map(p => `<p style="line-height: 1.8; text-indent: 2em; margin-bottom: 1em; font-size: 18px; text-align: justify;">${p}</p>`).join('')}
                 </div>
              `;
-             
-             const opt = {
-               margin:       10,
-               filename:     `${exportTitle}.pdf`,
-               image:        { type: 'jpeg', quality: 0.98 },
-               html2canvas:  { scale: 2, useCORS: true },
-               jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-             };
-             
-             html2pdf().set(opt).from(element).save();
+             document.body.appendChild(element);
+
+             try {
+                const canvas = await html2canvas(element, { scale: 2, useCORS: true });
+                const imgData = canvas.toDataURL('image/jpeg', 0.98);
+                const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+                
+                const imgWidth = 210;
+                const pageHeight = 297;
+                const imgHeight = (canvas.height * imgWidth) / canvas.width;
+                let heightLeft = imgHeight;
+                let position = 0;
+
+                pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+                heightLeft -= pageHeight;
+
+                while (heightLeft > 0) {
+                    position -= pageHeight; // Move image up
+                    pdf.addPage();
+                    pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+                    heightLeft -= pageHeight;
+                }
+                
+                pdf.save(`${exportTitle}.pdf`);
+             } finally {
+                document.body.removeChild(element);
+             }
 
           } else if (format === 'epub') {
               // Real EPUB Export using JSZip (Single Chapter)

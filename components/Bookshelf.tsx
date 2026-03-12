@@ -3,7 +3,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Book as BookIcon, MoreVertical, Edit2, Download, Trash2, Image as ImageIcon, Check, X, Upload, CheckCircle2, FileText, Crown, Lock, BookOpen, ScrollText, Rocket, Feather, FileUp, AlertTriangle, FileType, ArrowLeft, Tag, LayoutTemplate } from 'lucide-react';
 import { Book, Chapter } from '../types';
 import JSZip from 'jszip';
-import html2pdf from 'html2pdf.js';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 interface BookshelfProps {
   books: Book[];
@@ -252,10 +253,14 @@ const Bookshelf: React.FC<BookshelfProps> = ({ books, setBooks, onSelectBook, is
             link.click();
             URL.revokeObjectURL(url);
         } else if (format === 'pdf') {
-             // Real PDF Export using html2pdf.js
+             // Real PDF Export using html2canvas + jsPDF
              const element = document.createElement('div');
+             element.style.position = 'absolute';
+             element.style.left = '-9999px';
+             element.style.top = '0';
+             element.style.width = '210mm'; // A4 width
              element.innerHTML = `
-                <div style="font-family: 'Noto Serif SC', serif; padding: 40px; color: #333;">
+                <div style="font-family: 'Noto Serif SC', serif; padding: 40px; color: #333; background: white;">
                   <h1 style="text-align: center; font-size: 32px; margin-bottom: 60px;">${book.title}</h1>
                   ${book.chapters.map(c => `
                     <div style="page-break-before: always;">
@@ -265,16 +270,33 @@ const Bookshelf: React.FC<BookshelfProps> = ({ books, setBooks, onSelectBook, is
                   `).join('')}
                 </div>
              `;
-             
-             const opt = {
-               margin:       10,
-               filename:     `${book.title}_全本.pdf`,
-               image:        { type: 'jpeg', quality: 0.98 },
-               html2canvas:  { scale: 2, useCORS: true },
-               jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-             };
-             
-             html2pdf().set(opt).from(element).save();
+             document.body.appendChild(element);
+
+             try {
+                const canvas = await html2canvas(element, { scale: 2, useCORS: true });
+                const imgData = canvas.toDataURL('image/jpeg', 0.98);
+                const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+                
+                const imgWidth = 210;
+                const pageHeight = 297;
+                const imgHeight = (canvas.height * imgWidth) / canvas.width;
+                let heightLeft = imgHeight;
+                let position = 0;
+
+                pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+                heightLeft -= pageHeight;
+
+                while (heightLeft > 0) {
+                    position -= pageHeight; // Move image up
+                    pdf.addPage();
+                    pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+                    heightLeft -= pageHeight;
+                }
+                
+                pdf.save(`${book.title}_全本.pdf`);
+             } finally {
+                document.body.removeChild(element);
+             }
              
         } else if (format === 'epub') {
              // Real EPUB Export using JSZip
