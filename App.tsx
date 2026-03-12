@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import JSZip from 'jszip';
 import { 
   BookOpen, 
@@ -1105,6 +1106,7 @@ const App: React.FC = () => {
       )}
 
       {(isSettingUpBlackHouse || blackHouse.active) && <BlackHouseOverlay config={blackHouse} onExit={exitBlackHouse} onStart={startBlackHouse} onCancel={() => setIsSettingUpBlackHouse(false)} isSettingUp={isSettingUpBlackHouse} />}
+      <Analytics />
     </div>
   );
 };
